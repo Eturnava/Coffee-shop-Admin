@@ -1,0 +1,270 @@
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+
+const CoffeeContext = createContext()
+
+export const useCoffeeContext = () => {
+  const context = useContext(CoffeeContext)
+  if (!context) {
+    throw new Error('useCoffeeContext must be used within CoffeeProvider')
+  }
+  return context
+}
+
+const STORAGE_KEYS = {
+  INGREDIENTS: 'coffee_shop_ingredients',
+  COFFEES: 'coffee_shop_coffees',
+}
+
+const defaultIngredients = [
+  {
+    id: 'ing_sample1',
+    name: 'Arabica Beans',
+    price: 15.99,
+    description: 'High-quality Arabica coffee beans',
+    strength: 'Medium',
+    flavor: 'Fruity',
+  },
+  {
+    id: 'ing_sample2',
+    name: 'Robusta Beans',
+    price: 12.99,
+    description: 'Strong Robusta coffee beans',
+    strength: 'High',
+    flavor: 'Earthy',
+  },
+  {
+    id: 'ing_sample3',
+    name: 'Vanilla Syrup',
+    price: 8.99,
+    description: 'Sweet vanilla flavoring syrup',
+    strength: 'Low',
+    flavor: 'Sweet',
+  },
+]
+
+const defaultCoffees = [
+  {
+    id: '1',
+    title: 'Ethiopian Yirgacheffe',
+    ingredients: ['ing_sample1'],
+    description:
+      'A light roasted coffee with bright acidity, and complex fruit and floral notes.',
+    image: 'https://example.com/ethiopian.jpg',
+    country: 'Ethiopia',
+    caffeine: 120,
+  },
+  {
+    id: '2',
+    title: 'Colombian Supremo',
+    ingredients: ['ing_sample1', 'ing_sample3'],
+    description:
+      'Medium roast with a sweet and rich caramel flavor, balanced acidity and a clean finish.',
+    image: 'https://example.com/colombian.jpg',
+    country: 'Colombia',
+    caffeine: 140,
+  },
+]
+
+const toPositiveIntOrNull = value => {
+  const n = Number.parseInt(String(value), 10)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+const extractTrailingNumber = value => {
+  const match = String(value).match(/(\d+)\s*$/)
+  return match ? toPositiveIntOrNull(match[1]) : null
+}
+
+const getNextNumericId = items => {
+  const maxId = items.reduce((max, item) => {
+    const n = toPositiveIntOrNull(item?.id)
+    return n ? Math.max(max, n) : max
+  }, 0)
+  return String(maxId + 1)
+}
+
+const getNextSequentialIngredientId = ingredients => {
+  const maxId = ingredients.reduce((max, ingredient) => {
+    const n = extractTrailingNumber(ingredient?.id)
+    return n ? Math.max(max, n) : max
+  }, 0)
+  return `ing_sample${maxId + 1}`
+}
+
+const normalizeCoffeeIds = coffees => {
+  const allNumeric = coffees.every(c => toPositiveIntOrNull(c?.id) !== null)
+  if (allNumeric) return coffees
+
+  return coffees.map((coffee, idx) => ({
+    ...coffee,
+    id: String(idx + 1),
+  }))
+}
+
+const normalizeIngredientIds = ingredients => {
+  const allIngSample = ingredients.every(
+    ing => ing?.id && String(ing.id).startsWith('ing_sample')
+  )
+  if (allIngSample) return ingredients
+
+  return ingredients.map((ingredient, idx) => ({
+    ...ingredient,
+    id: `ing_sample${idx + 1}`,
+  }))
+}
+
+const loadFromStorage = (key, defaultValue) => {
+  try {
+    const item = localStorage.getItem(key)
+    return item ? JSON.parse(item) : defaultValue
+  } catch (error) {
+    console.error(`Error loading ${key} from localStorage:`, error)
+    return defaultValue
+  }
+}
+
+const saveToStorage = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch (error) {
+    console.error(`Error saving ${key} to localStorage:`, error)
+  }
+}
+
+export const CoffeeProvider = ({ children }) => {
+  const [ingredients, setIngredients] = useState(() =>
+    normalizeIngredientIds(loadFromStorage(STORAGE_KEYS.INGREDIENTS, defaultIngredients))
+  )
+  const [coffees, setCoffees] = useState(() =>
+    normalizeCoffeeIds(loadFromStorage(STORAGE_KEYS.COFFEES, defaultCoffees))
+  )
+
+  
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.INGREDIENTS, ingredients)
+  }, [ingredients])
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.COFFEES, coffees)
+  }, [coffees])
+
+ 
+  useEffect(() => {
+    const normalizedCoffees = normalizeCoffeeIds(coffees)
+    const normalizedIngredients = normalizeIngredientIds(ingredients)
+    
+   
+    const coffeesChanged =
+      normalizedCoffees.length !== coffees.length ||
+      normalizedCoffees.some((c, i) => String(c.id) !== String(coffees[i]?.id))
+    
+    
+    const ingredientsChanged =
+      normalizedIngredients.length !== ingredients.length ||
+      normalizedIngredients.some((ing, i) => String(ing.id) !== String(ingredients[i]?.id))
+    
+    if (coffeesChanged) {
+      setCoffees(normalizedCoffees)
+      saveToStorage(STORAGE_KEYS.COFFEES, normalizedCoffees)
+    }
+    
+    if (ingredientsChanged) {
+      setIngredients(normalizedIngredients)
+      saveToStorage(STORAGE_KEYS.INGREDIENTS, normalizedIngredients)
+    }
+    
+  }, [])
+
+  const calculateCoffeePrice = useCallback(
+    (ingredientIds) => {
+      const basePrice = 2
+      const ingredientPrices = ingredientIds.reduce((sum, ingId) => {
+        const ingredient = ingredients.find((ing) => ing.id === ingId)
+        return sum + (ingredient ? ingredient.price : 0)
+      }, 0)
+      return basePrice + ingredientPrices
+    },
+    [ingredients]
+  )
+
+  const addIngredient = (ingredient) => {
+    setIngredients((prev) => {
+      const nextId = getNextSequentialIngredientId(prev)
+      const newIngredient = {
+        ...ingredient,
+        id: nextId,
+      }
+      const updated = [...prev, newIngredient]
+      saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
+      return updated
+    })
+    return null
+  }
+
+  const updateIngredient = (id, updatedIngredient) => {
+    setIngredients((prev) => {
+      const updated = prev.map((ing) => (ing.id === id ? { ...updatedIngredient, id } : ing))
+      saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
+      return updated
+    })
+  }
+
+  const deleteIngredient = (id) => {
+    setIngredients((prev) => {
+      const updated = prev.filter((ing) => ing.id !== id)
+      saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
+      return updated
+    })
+    
+    setCoffees((prev) => {
+      const updated = prev.map((coffee) => ({
+        ...coffee,
+        ingredients: coffee.ingredients.filter((ingId) => ingId !== id),
+      }))
+      saveToStorage(STORAGE_KEYS.COFFEES, updated)
+      return updated
+    })
+  }
+
+  const addCoffee = (coffee) => {
+    const newCoffee = { ...coffee }
+    setCoffees((prev) => {
+      const updated = [...prev, { ...newCoffee, id: getNextNumericId(prev) }]
+      saveToStorage(STORAGE_KEYS.COFFEES, updated)
+      return updated
+    })
+    return getNextNumericId(coffees)
+  }
+
+  const updateCoffee = (id, updatedCoffee) => {
+    setCoffees((prev) => {
+      const updated = prev.map((coffee) =>
+        coffee.id === id ? { ...updatedCoffee, id } : coffee
+      )
+      saveToStorage(STORAGE_KEYS.COFFEES, updated)
+      return updated
+    })
+  }
+
+  const deleteCoffee = (id) => {
+    setCoffees((prev) => {
+      const updated = prev.filter((coffee) => coffee.id !== id)
+      saveToStorage(STORAGE_KEYS.COFFEES, updated)
+      return updated
+    })
+  }
+
+  const value = {
+    ingredients,
+    coffees,
+    addIngredient,
+    updateIngredient,
+    deleteIngredient,
+    addCoffee,
+    updateCoffee,
+    deleteCoffee,
+    calculateCoffeePrice,
+  }
+
+  return <CoffeeContext.Provider value={value}>{children}</CoffeeContext.Provider>
+}
