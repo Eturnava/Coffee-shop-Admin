@@ -186,7 +186,7 @@ export const CoffeeProvider = ({ children }) => {
     }
   }, [])
 
-  // Initialize API connection + load initial data
+
   useEffect(() => {
     const initApi = async () => {
       setLoading(true)
