@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { apiClient } from '../lib/api'
 
 const CoffeeContext = createContext()
 
@@ -116,9 +117,22 @@ const normalizeIngredientIds = ingredients => {
 const loadFromStorage = (key, defaultValue) => {
   try {
     const item = localStorage.getItem(key)
-    return item ? JSON.parse(item) : defaultValue
+    if (item) {
+      const parsed = JSON.parse(item)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed
+      }
+    }
+    return defaultValue
   } catch (error) {
     console.error(`Error loading ${key} from localStorage:`, error)
+    try {
+      const item = localStorage.getItem(key)
+      if (item) {
+        console.warn(`Failed to parse ${key}, but data exists. Keeping defaults.`)
+      }
+    } catch (e) {
+    }
     return defaultValue
   }
 }
@@ -132,14 +146,69 @@ const saveToStorage = (key, value) => {
 }
 
 export const CoffeeProvider = ({ children }) => {
+  const loadedIngredients = loadFromStorage(STORAGE_KEYS.INGREDIENTS, defaultIngredients)
+  const loadedCoffees = loadFromStorage(STORAGE_KEYS.COFFEES, defaultCoffees)
+  
   const [ingredients, setIngredients] = useState(() =>
-    normalizeIngredientIds(loadFromStorage(STORAGE_KEYS.INGREDIENTS, defaultIngredients))
+    normalizeIngredientIds(loadedIngredients)
   )
   const [coffees, setCoffees] = useState(() =>
-    normalizeCoffeeIds(loadFromStorage(STORAGE_KEYS.COFFEES, defaultCoffees))
+    normalizeCoffeeIds(loadedCoffees)
   )
+  const [isApiConnected, setIsApiConnected] = useState(false)
+  const [loading, setLoading] = useState(false)
 
-  
+  const normalizeCoffeeFromApi = useCallback((coffee) => {
+    const title = coffee.title || coffee.name || ''
+    const image = coffee.image || coffee.image_url || ''
+    return {
+      id: String(coffee.id),
+      title,
+      ingredients: Array.isArray(coffee.ingredients) ? coffee.ingredients : [],
+      description: coffee.description || '',
+      image,
+      country: coffee.country || '',
+      caffeine: typeof coffee.caffeine === 'number' ? coffee.caffeine : 0,
+      price_usd: typeof coffee.price_usd === 'number' ? coffee.price_usd : 0,
+      price_gel: typeof coffee.price_gel === 'number' ? coffee.price_gel : 0,
+      long_description: coffee.long_description ?? null,
+    }
+  }, [])
+
+  const normalizeIngredientFromApi = useCallback((ing) => {
+    return {
+      id: String(ing.id),
+      name: ing.name || '',
+      price: typeof ing.price === 'number' ? ing.price : 0,
+      description: ing.description || '',
+      strength: ing.strength || '',
+      flavor: ing.flavor || '',
+    }
+  }, [])
+
+  // Initialize API connection + load initial data
+  useEffect(() => {
+    const initApi = async () => {
+      setLoading(true)
+      try {
+        const apiIngredients = await apiClient.getIngredients()
+        const apiCoffees = await apiClient.getCoffees()
+
+        setIsApiConnected(true)
+        setIngredients(normalizeIngredientIds((apiIngredients || []).map(normalizeIngredientFromApi)))
+        setCoffees(normalizeCoffeeIds((apiCoffees || []).map(normalizeCoffeeFromApi)))
+        console.log('Connected to API')
+      } catch (error) {
+        console.warn('API not configured or connection failed:', error.message)
+        setIsApiConnected(false)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    initApi()
+  }, [normalizeCoffeeFromApi, normalizeIngredientFromApi])
+
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.INGREDIENTS, ingredients)
   }, [ingredients])
@@ -147,33 +216,6 @@ export const CoffeeProvider = ({ children }) => {
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.COFFEES, coffees)
   }, [coffees])
-
- 
-  useEffect(() => {
-    const normalizedCoffees = normalizeCoffeeIds(coffees)
-    const normalizedIngredients = normalizeIngredientIds(ingredients)
-    
-   
-    const coffeesChanged =
-      normalizedCoffees.length !== coffees.length ||
-      normalizedCoffees.some((c, i) => String(c.id) !== String(coffees[i]?.id))
-    
-    
-    const ingredientsChanged =
-      normalizedIngredients.length !== ingredients.length ||
-      normalizedIngredients.some((ing, i) => String(ing.id) !== String(ingredients[i]?.id))
-    
-    if (coffeesChanged) {
-      setCoffees(normalizedCoffees)
-      saveToStorage(STORAGE_KEYS.COFFEES, normalizedCoffees)
-    }
-    
-    if (ingredientsChanged) {
-      setIngredients(normalizedIngredients)
-      saveToStorage(STORAGE_KEYS.INGREDIENTS, normalizedIngredients)
-    }
-    
-  }, [])
 
   const calculateCoffeePrice = useCallback(
     (ingredientIds) => {
@@ -187,7 +229,44 @@ export const CoffeeProvider = ({ children }) => {
     [ingredients]
   )
 
+  const toApiCoffeePayload = useCallback(
+    (coffee) => {
+      const price_gel = calculateCoffeePrice(coffee.ingredients || [])
+      const usdRate = 2.7
+      const price_usd = Number((price_gel / usdRate).toFixed(2))
+
+      return {
+        name: coffee.title,
+        title: coffee.title,
+        description: coffee.description,
+        long_description: coffee.long_description ?? null,
+        image_url: coffee.image || null,
+        image: coffee.image || null,
+        price_usd,
+        price_gel,
+        country: coffee.country,
+        caffeine: coffee.caffeine,
+        ingredients: coffee.ingredients || [],
+      }
+    },
+    [calculateCoffeePrice]
+  )
+
   const addIngredient = (ingredient) => {
+    if (isApiConnected) {
+      apiClient
+        .createIngredient(ingredient)
+        .then((created) => {
+          setIngredients((prev) => {
+            const updated = normalizeIngredientIds([...prev, normalizeIngredientFromApi(created)])
+            saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
+            return updated
+          })
+        })
+        .catch((err) => console.error('Failed to create ingredient:', err))
+      return null
+    }
+
     setIngredients((prev) => {
       const nextId = getNextSequentialIngredientId(prev)
       const newIngredient = {
@@ -202,6 +281,20 @@ export const CoffeeProvider = ({ children }) => {
   }
 
   const updateIngredient = (id, updatedIngredient) => {
+    if (isApiConnected) {
+      apiClient
+        .updateIngredient(id, { ...updatedIngredient, id })
+        .then((saved) => {
+          setIngredients((prev) => {
+            const updated = prev.map((ing) => (ing.id === id ? normalizeIngredientFromApi(saved) : ing))
+            saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
+            return updated
+          })
+        })
+        .catch((err) => console.error('Failed to update ingredient:', err))
+      return
+    }
+
     setIngredients((prev) => {
       const updated = prev.map((ing) => (ing.id === id ? { ...updatedIngredient, id } : ing))
       saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
@@ -210,6 +303,29 @@ export const CoffeeProvider = ({ children }) => {
   }
 
   const deleteIngredient = (id) => {
+    if (isApiConnected) {
+      apiClient
+        .deleteIngredient(id)
+        .then(() => {
+          setIngredients((prev) => {
+            const updated = prev.filter((ing) => ing.id !== id)
+            saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
+            return updated
+          })
+
+          setCoffees((prev) => {
+            const updated = prev.map((coffee) => ({
+              ...coffee,
+              ingredients: coffee.ingredients.filter((ingId) => ingId !== id),
+            }))
+            saveToStorage(STORAGE_KEYS.COFFEES, updated)
+            return updated
+          })
+        })
+        .catch((err) => console.error('Failed to delete ingredient:', err))
+      return
+    }
+
     setIngredients((prev) => {
       const updated = prev.filter((ing) => ing.id !== id)
       saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
@@ -227,6 +343,21 @@ export const CoffeeProvider = ({ children }) => {
   }
 
   const addCoffee = (coffee) => {
+    if (isApiConnected) {
+      const payload = toApiCoffeePayload(coffee)
+      apiClient
+        .createCoffee(payload)
+        .then((created) => {
+          setCoffees((prev) => {
+            const updated = normalizeCoffeeIds([...prev, normalizeCoffeeFromApi(created)])
+            saveToStorage(STORAGE_KEYS.COFFEES, updated)
+            return updated
+          })
+        })
+        .catch((err) => console.error('Failed to create coffee:', err))
+      return null
+    }
+
     const newCoffee = { ...coffee }
     setCoffees((prev) => {
       const updated = [...prev, { ...newCoffee, id: getNextNumericId(prev) }]
@@ -237,6 +368,21 @@ export const CoffeeProvider = ({ children }) => {
   }
 
   const updateCoffee = (id, updatedCoffee) => {
+    if (isApiConnected) {
+      const payload = toApiCoffeePayload({ ...updatedCoffee, id })
+      apiClient
+        .updateCoffee(id, payload)
+        .then((saved) => {
+          setCoffees((prev) => {
+            const updated = prev.map((coffee) => (coffee.id === id ? normalizeCoffeeFromApi(saved) : coffee))
+            saveToStorage(STORAGE_KEYS.COFFEES, updated)
+            return updated
+          })
+        })
+        .catch((err) => console.error('Failed to update coffee:', err))
+      return
+    }
+
     setCoffees((prev) => {
       const updated = prev.map((coffee) =>
         coffee.id === id ? { ...updatedCoffee, id } : coffee
@@ -247,6 +393,20 @@ export const CoffeeProvider = ({ children }) => {
   }
 
   const deleteCoffee = (id) => {
+    if (isApiConnected) {
+      apiClient
+        .deleteCoffee(id)
+        .then(() => {
+          setCoffees((prev) => {
+            const updated = prev.filter((coffee) => coffee.id !== id)
+            saveToStorage(STORAGE_KEYS.COFFEES, updated)
+            return updated
+          })
+        })
+        .catch((err) => console.error('Failed to delete coffee:', err))
+      return
+    }
+
     setCoffees((prev) => {
       const updated = prev.filter((coffee) => coffee.id !== id)
       saveToStorage(STORAGE_KEYS.COFFEES, updated)
@@ -264,6 +424,8 @@ export const CoffeeProvider = ({ children }) => {
     updateCoffee,
     deleteCoffee,
     calculateCoffeePrice,
+    isApiConnected,
+    loading,
   }
 
   return <CoffeeContext.Provider value={value}>{children}</CoffeeContext.Provider>
