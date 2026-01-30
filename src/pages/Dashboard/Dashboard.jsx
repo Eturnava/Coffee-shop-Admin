@@ -5,6 +5,12 @@ import styles from './Dashboard.module.css'
 const Dashboard = () => {
   const { coffees, calculateCoffeePrice, deleteCoffee } = useCoffeeContext()
 
+  const getDisplayId = (coffee) => {
+    if (coffee?.displayId) return coffee.displayId
+    const id = String(coffee?.id || '')
+    return id ? id.slice(0, 8).toUpperCase() : ''
+  }
+
   const handleDelete = (id) => {
     if (window.confirm('Are you sure you want to delete this coffee?')) {
       deleteCoffee(id)
@@ -37,7 +43,7 @@ const Dashboard = () => {
               const totalPrice = calculateCoffeePrice(coffee.ingredients)
               return (
                 <tr key={coffee.id}>
-                  <td>{coffee.id}</td>
+                  <td>{getDisplayId(coffee)}</td>
                   <td>{coffee.title}</td>
                   <td>{coffee.country}</td>
                   <td>{coffee.caffeine}mg</td>

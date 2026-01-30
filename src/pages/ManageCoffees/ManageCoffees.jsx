@@ -5,6 +5,12 @@ import styles from './ManageCoffees.module.css'
 const ManageCoffees = () => {
   const { coffees, ingredients, deleteCoffee, calculateCoffeePrice } = useCoffeeContext()
 
+  const getDisplayId = (coffee) => {
+    if (coffee?.displayId) return coffee.displayId
+    const id = String(coffee?.id || '')
+    return id ? id.slice(0, 8).toUpperCase() : ''
+  }
+
   const handleDelete = (id) => {
     if (window.confirm('Are you sure you want to delete this coffee?')) {
       deleteCoffee(id)
@@ -55,7 +61,7 @@ const ManageCoffees = () => {
               const totalPrice = calculateCoffeePrice(coffee.ingredients)
               return (
                 <tr key={coffee.id}>
-                  <td>{coffee.id}</td>
+                  <td>{getDisplayId(coffee)}</td>
                   <td>{coffee.title}</td>
                   <td>{getIngredientNames(coffee.ingredients)}</td>
                   <td className={styles.descriptionCell}>

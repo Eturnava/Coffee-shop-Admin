@@ -145,6 +145,13 @@ const saveToStorage = (key, value) => {
   }
 }
 
+const withSequentialDisplayIds = (items, prefix) => {
+  return items.map((item, idx) => ({
+    ...item,
+    displayId: `${prefix}${idx + 1}`,
+  }))
+}
+
 export const CoffeeProvider = ({ children }) => {
   const loadedIngredients = loadFromStorage(STORAGE_KEYS.INGREDIENTS, defaultIngredients)
   const loadedCoffees = loadFromStorage(STORAGE_KEYS.COFFEES, defaultCoffees)
@@ -161,8 +168,9 @@ export const CoffeeProvider = ({ children }) => {
   const normalizeCoffeeFromApi = useCallback((coffee) => {
     const title = coffee.title || coffee.name || ''
     const image = coffee.image || coffee.image_url || ''
+    const id = String(coffee.id)
     return {
-      id: String(coffee.id),
+      id,
       title,
       ingredients: Array.isArray(coffee.ingredients) ? coffee.ingredients : [],
       description: coffee.description || '',
@@ -172,17 +180,34 @@ export const CoffeeProvider = ({ children }) => {
       price_usd: typeof coffee.price_usd === 'number' ? coffee.price_usd : 0,
       price_gel: typeof coffee.price_gel === 'number' ? coffee.price_gel : 0,
       long_description: coffee.long_description ?? null,
+      created_at: coffee.created_at,
     }
   }, [])
 
   const normalizeIngredientFromApi = useCallback((ing) => {
+    const id = String(ing.id)
     return {
-      id: String(ing.id),
+      id,
       name: ing.name || '',
       price: typeof ing.price === 'number' ? ing.price : 0,
       description: ing.description || '',
       strength: ing.strength || '',
       flavor: ing.flavor || '',
+    }
+  }, [])
+
+  const rebuildDisplayIds = useCallback((nextIngredients, nextCoffees) => {
+    const ingredientsOrdered = [...nextIngredients]
+
+    const coffeesSorted = [...nextCoffees].sort((a, b) => {
+      const at = a?.created_at ? Date.parse(a.created_at) : 0
+      const bt = b?.created_at ? Date.parse(b.created_at) : 0
+      return at - bt
+    })
+
+    return {
+      ingredients: withSequentialDisplayIds(ingredientsOrdered, 'ing_simple'),
+      coffees: withSequentialDisplayIds(coffeesSorted, 'coffee_simple'),
     }
   }, [])
 
@@ -195,8 +220,11 @@ export const CoffeeProvider = ({ children }) => {
         const apiCoffees = await apiClient.getCoffees()
 
         setIsApiConnected(true)
-        setIngredients(normalizeIngredientIds((apiIngredients || []).map(normalizeIngredientFromApi)))
-        setCoffees(normalizeCoffeeIds((apiCoffees || []).map(normalizeCoffeeFromApi)))
+        const ing = (apiIngredients || []).map(normalizeIngredientFromApi)
+        const cof = (apiCoffees || []).map(normalizeCoffeeFromApi)
+        const rebuilt = rebuildDisplayIds(ing, cof)
+        setIngredients(rebuilt.ingredients)
+        setCoffees(rebuilt.coffees)
         console.log('Connected to API')
       } catch (error) {
         console.warn('API not configured or connection failed:', error.message)
@@ -258,9 +286,12 @@ export const CoffeeProvider = ({ children }) => {
         .createIngredient(ingredient)
         .then((created) => {
           setIngredients((prev) => {
-            const updated = normalizeIngredientIds([...prev, normalizeIngredientFromApi(created)])
-            saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
-            return updated
+            const updatedRaw = [...prev, normalizeIngredientFromApi(created)]
+            const rebuilt = rebuildDisplayIds(updatedRaw, coffees)
+            saveToStorage(STORAGE_KEYS.INGREDIENTS, rebuilt.ingredients)
+            saveToStorage(STORAGE_KEYS.COFFEES, rebuilt.coffees)
+            setCoffees(rebuilt.coffees)
+            return rebuilt.ingredients
           })
         })
         .catch((err) => console.error('Failed to create ingredient:', err))
@@ -308,18 +339,17 @@ export const CoffeeProvider = ({ children }) => {
         .deleteIngredient(id)
         .then(() => {
           setIngredients((prev) => {
-            const updated = prev.filter((ing) => ing.id !== id)
-            saveToStorage(STORAGE_KEYS.INGREDIENTS, updated)
-            return updated
-          })
-
-          setCoffees((prev) => {
-            const updated = prev.map((coffee) => ({
+            const updatedRaw = prev.filter((ing) => ing.id !== id)
+            const coffeesRaw = coffees.map((coffee) => ({
               ...coffee,
               ingredients: coffee.ingredients.filter((ingId) => ingId !== id),
             }))
-            saveToStorage(STORAGE_KEYS.COFFEES, updated)
-            return updated
+
+            const rebuilt = rebuildDisplayIds(updatedRaw, coffeesRaw)
+            saveToStorage(STORAGE_KEYS.INGREDIENTS, rebuilt.ingredients)
+            saveToStorage(STORAGE_KEYS.COFFEES, rebuilt.coffees)
+            setCoffees(rebuilt.coffees)
+            return rebuilt.ingredients
           })
         })
         .catch((err) => console.error('Failed to delete ingredient:', err))
@@ -349,9 +379,12 @@ export const CoffeeProvider = ({ children }) => {
         .createCoffee(payload)
         .then((created) => {
           setCoffees((prev) => {
-            const updated = normalizeCoffeeIds([...prev, normalizeCoffeeFromApi(created)])
-            saveToStorage(STORAGE_KEYS.COFFEES, updated)
-            return updated
+            const updatedRaw = [...prev, normalizeCoffeeFromApi(created)]
+            const rebuilt = rebuildDisplayIds(ingredients, updatedRaw)
+            saveToStorage(STORAGE_KEYS.INGREDIENTS, rebuilt.ingredients)
+            saveToStorage(STORAGE_KEYS.COFFEES, rebuilt.coffees)
+            setIngredients(rebuilt.ingredients)
+            return rebuilt.coffees
           })
         })
         .catch((err) => console.error('Failed to create coffee:', err))
@@ -398,9 +431,12 @@ export const CoffeeProvider = ({ children }) => {
         .deleteCoffee(id)
         .then(() => {
           setCoffees((prev) => {
-            const updated = prev.filter((coffee) => coffee.id !== id)
-            saveToStorage(STORAGE_KEYS.COFFEES, updated)
-            return updated
+            const updatedRaw = prev.filter((coffee) => coffee.id !== id)
+            const rebuilt = rebuildDisplayIds(ingredients, updatedRaw)
+            saveToStorage(STORAGE_KEYS.INGREDIENTS, rebuilt.ingredients)
+            saveToStorage(STORAGE_KEYS.COFFEES, rebuilt.coffees)
+            setIngredients(rebuilt.ingredients)
+            return rebuilt.coffees
           })
         })
         .catch((err) => console.error('Failed to delete coffee:', err))

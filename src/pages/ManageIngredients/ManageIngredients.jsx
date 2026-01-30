@@ -56,6 +56,12 @@ const ManageIngredients = () => {
     }
   }
 
+  const getDisplayId = (ingredient) => {
+    if (ingredient?.displayId) return ingredient.displayId
+    const id = String(ingredient?.id || '')
+    return id ? id.slice(0, 8).toUpperCase() : ''
+  }
+
   const handleCancel = () => {
     setEditingId(null)
     setFormData({
@@ -91,7 +97,7 @@ const ManageIngredients = () => {
           <tbody>
             {ingredients.map((ingredient) => (
               <tr key={ingredient.id}>
-                <td>{ingredient.id}</td>
+                <td>{getDisplayId(ingredient)}</td>
                 <td>{ingredient.name}</td>
                 <td>{ingredient.price.toFixed(2)} GEL</td>
                 <td>{ingredient.strength}</td>

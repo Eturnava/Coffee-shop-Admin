@@ -27,6 +27,8 @@ const ViewCoffee = () => {
     .map((ingId) => ingredients.find((ing) => ing.id === ingId))
     .filter(Boolean)
 
+  const displayId = coffee.displayId || String(coffee.id).slice(0, 8).toUpperCase()
+
   const handleDelete = () => {
     if (window.confirm('Are you sure you want to delete this coffee?')) {
       deleteCoffee(coffee.id)
@@ -78,7 +80,7 @@ const ViewCoffee = () => {
               </div>
               <div className={styles.detailItem}>
                 <span className={styles.label}>Coffee ID:</span>
-                <span className={styles.value}>{coffee.id}</span>
+                <span className={styles.value}>{displayId}</span>
               </div>
             </div>
           </div>
